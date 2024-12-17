@@ -10,9 +10,22 @@ import {SIG_VALIDATION_FAILED, SIG_VALIDATION_SUCCESS} from "account-abstraction
 import {IEntryPoint} from "account-abstraction/interfaces/IEntryPoint.sol";
 
 contract MinimalAccount is IAccount, Ownable {
+    ///////////////////////////////////////////////
+    //             ERRORS
+    ///////////////////////////////////////////////
     error MinimalAccount__NotFromEntryPoint();
+    error MinimalAccount__NotFromEntryPointOrOwner();
+    error MinimalAccount__CallFailed(bytes result);
+
+    ///////////////////////////////////////////////
+    //             STATE VARIABLES
+    ///////////////////////////////////////////////
 
     address private immutable i_entryPoint;
+
+    ///////////////////////////////////////////////
+    //             MODIFIERS
+    ///////////////////////////////////////////////
 
     modifier requireFromEntryPoint() {
         if (msg.sender != address(i_entryPoint)) {
@@ -21,8 +34,31 @@ contract MinimalAccount is IAccount, Ownable {
         _;
     }
 
+    modifier requireFromEntryPointOrOwner() {
+        if (msg.sender != address(i_entryPoint) && msg.sender != owner()) {
+            revert MinimalAccount__NotFromEntryPointOrOwner();
+        }
+        _;
+    }
+
+    ///////////////////////////////////////////////
+    //             CONSTRUCTOR
+    ///////////////////////////////////////////////
     constructor(address entryPoint) Ownable(msg.sender) {
         i_entryPoint = entryPoint;
+    }
+
+    receive() external payable {}
+
+    ///////////////////////////////////////////////
+    //             EXTERNAL FUNCTIONS
+    ///////////////////////////////////////////////
+    function execute(address dest, uint256 value, bytes calldata funcData) external requireFromEntryPointOrOwner {
+        (bool success, bytes memory result) = dest.call{value: value, gas: type(uint256).max}(funcData);
+        
+        if(!success) {
+            revert MinimalAccount__CallFailed(result);
+        }
     }
 
     function validateUserOp(PackedUserOperation calldata userOp, bytes32 userOpHash, uint256 missingAccountFunds)
@@ -34,6 +70,10 @@ contract MinimalAccount is IAccount, Ownable {
         // ideally we should also check the nonce, but for simplicity we skip it here
         _payPrefund(missingAccountFunds);
     }
+
+    ///////////////////////////////////////////////
+    //             INTERNAL FUNCTIONS
+    ///////////////////////////////////////////////
 
     // Many ways to implement the signature validation. I go with the simplest one. A signature is valid if its the minimal account owner.
     function _validateSignature(PackedUserOperation calldata userOp, bytes32 userOpHash)
